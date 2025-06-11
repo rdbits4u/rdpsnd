@@ -30,6 +30,8 @@ pub const rdpsnd_priv_t = extern struct
     format_no: u16 = 0,
     block_no: u8 = 0,
     data: [4]u8 = .{0, 0, 0, 0},
+    body_size: u32 = 0,
+    wave_size: u32 = 0,
 
     //*************************************************************************
     pub fn delete(self: *rdpsnd_priv_t) void
@@ -68,30 +70,37 @@ pub const rdpsnd_priv_t = extern struct
     fn process_zero(self: *rdpsnd_priv_t, channel_id: u16,
             s: *parse.parse_t) !c_int
     {
-        try self.logln(@src(), "", .{});
+        try self.logln_devel(@src(), "", .{});
         try s.reset(0);
         try s.check_rem(4);
         s.out_u8_slice(&self.data);
         try s.reset(0);
-        if (self.rdpsnd.wave) |awave|
+        const rem = s.get_rem();
+        try self.logln_devel(@src(), "body_size {} rem {}",
+                .{self.body_size, rem});
+        // check if we got the expected size
+        if (self.wave_size - 8 != rem)
         {
-            const rem = s.get_rem();
-            try s.check_rem(rem);
-            const slice = s.in_u8_slice(rem);
-            return awave(&self.rdpsnd, channel_id, self.time_stamp,
-                    self.format_no, self.block_no,
+            return c.LIBRDPSND_ERROR_PROCESS_WAVE;
+        }
+        try s.check_rem(rem);
+        const slice = s.in_u8_slice(rem);
+        if (self.rdpsnd.process_wave) |aprocess_wave|
+        {
+            return aprocess_wave(&self.rdpsnd, channel_id,
+                    self.time_stamp, self.format_no, self.block_no,
                     slice.ptr, @truncate(slice.len));
         }
-        return c.LIBRDPSND_ERROR_NONE;
+        return c.LIBRDPSND_ERROR_PROCESS_WAVE;
     }
 
     //*************************************************************************
     fn process_close(self: *rdpsnd_priv_t, channel_id: u16) !c_int
     {
         try self.logln(@src(), "", .{});
-        if (self.rdpsnd.close) |aclose|
+        if (self.rdpsnd.process_close) |aprocess_close|
         {
-            return aclose(&self.rdpsnd, channel_id);
+            return aprocess_close(&self.rdpsnd, channel_id);
         }
         return c.LIBRDPSND_ERROR_NONE;
     }
@@ -99,13 +108,14 @@ pub const rdpsnd_priv_t = extern struct
     //*************************************************************************
     fn process_wave(self: *rdpsnd_priv_t, s: *parse.parse_t) !c_int
     {
-        try self.logln(@src(), "", .{});
+        try self.logln_devel(@src(), "", .{});
         try s.check_rem(12);
         self.time_stamp = s.in_u16_le();
         self.format_no = s.in_u16_le();
         self.block_no = s.in_u8();
         s.in_u8_skip(3); // bPad
         std.mem.copyForwards(u8, &self.data, s.in_u8_slice(4));
+        self.wave_size = self.body_size;
         return c.LIBRDPSND_ERROR_NONE;
     }
 
@@ -116,9 +126,9 @@ pub const rdpsnd_priv_t = extern struct
         try self.logln(@src(), "", .{});
         try s.check_rem(4);
         const volume = s.in_u32_le();
-        if (self.rdpsnd.volume) |avolume|
+        if (self.rdpsnd.process_volume) |aprocess_volume|
         {
-            return avolume(&self.rdpsnd, channel_id, volume);
+            return aprocess_volume(&self.rdpsnd, channel_id, volume);
         }
         return c.LIBRDPSND_ERROR_NONE;
     }
@@ -130,9 +140,9 @@ pub const rdpsnd_priv_t = extern struct
         try self.logln(@src(), "", .{});
         try s.check_rem(4);
         const pitch = s.in_u32_le();
-        if (self.rdpsnd.pitch) |apitch|
+        if (self.rdpsnd.process_pitch) |aprocess_pitch|
         {
-            return apitch(&self.rdpsnd, channel_id, pitch);
+            return aprocess_pitch(&self.rdpsnd, channel_id, pitch);
         }
         return c.LIBRDPSND_ERROR_NONE;
     }
@@ -146,11 +156,27 @@ pub const rdpsnd_priv_t = extern struct
     }
 
     //*************************************************************************
-    fn process_training(self: *rdpsnd_priv_t, s: *parse.parse_t) !c_int
+    fn process_training(self: *rdpsnd_priv_t, channel_id: u16,
+            s: *parse.parse_t) !c_int
     {
-        try self.logln(@src(), "", .{});
-        _ = s;
-        return c.LIBRDPSND_ERROR_NONE;
+        try self.logln(@src(), "channel_id 0x{X}", .{channel_id});
+        try s.check_rem(4);
+        const time_stamp = s.in_u16_le();
+        const pack_size = s.in_u16_le();
+        var slice: []u8 = &.{};
+        if (pack_size > 4)
+        {
+            try s.check_rem(pack_size - 4);
+            slice.ptr = s.data.ptr + s.offset;
+            slice.len = pack_size - 4;
+            s.in_u8_skip(pack_size - 4);
+        }
+        if (self.rdpsnd.process_training) |aprocess_training|
+        {
+            return aprocess_training(&self.rdpsnd, channel_id, time_stamp,
+                    pack_size, slice.ptr, @truncate(slice.len));
+        }
+        return c.LIBRDPSND_ERROR_PROCESS_TRAINING;
     }
 
     //*************************************************************************
@@ -158,7 +184,10 @@ pub const rdpsnd_priv_t = extern struct
             s: *parse.parse_t) !c_int
     {
         try s.check_rem(20);
-        s.in_u8_skip(14); // dwFlags, dwVolume, dwPitch, wDGramPort
+        const flags = s.in_u32_le();
+        const volume = s.in_u32_le();
+        const pitch = s.in_u32_le();
+        const dgram_port = s.in_u16_le();
         const num_formats = s.in_u16_le();
         const block_no = s.in_u8();
         const version = s.in_u16_le();
@@ -186,12 +215,13 @@ pub const rdpsnd_priv_t = extern struct
             }
             try formats.append(format);
         }
-        if (self.rdpsnd.formats) |aformats|
+        if (self.rdpsnd.process_formats) |aprocess_formats|
         {
-            return aformats(&self.rdpsnd, channel_id, version, block_no,
+            return aprocess_formats(&self.rdpsnd, channel_id, flags, volume,
+                    pitch, dgram_port, version, block_no,
                     num_formats, formats.items.ptr);
         }
-        return c.LIBRDPSND_ERROR_NONE;
+        return c.LIBRDPSND_ERROR_PROCESS_FORMATS;
     }
 
     //*************************************************************************
@@ -246,16 +276,14 @@ pub const rdpsnd_priv_t = extern struct
     pub fn process_slice(self: *rdpsnd_priv_t, channel_id: u16,
             slice: []u8) !c_int
     {
+        try self.logln_devel(@src(), "channel_id 0x{X} slice.len {}",
+                .{channel_id, slice.len});
         const s = try parse.create_from_slice(self.allocator, slice);
         defer s.delete();
         try s.check_rem(4);
         const msg_type = s.in_u8();
         s.in_u8_skip(1); // bPad
-        const body_size = s.in_u16_le();
-        try s.check_rem(body_size);
-        try self.logln(@src(),
-                "channel_id 0x{X} msg_type {} body_size {}",
-                .{channel_id, msg_type, body_size});
+        self.body_size = s.in_u16_le();
         return switch (msg_type)
         {
             0 => self.process_zero(channel_id, s),
@@ -264,7 +292,7 @@ pub const rdpsnd_priv_t = extern struct
             SNDC_SETVOLUME => self.process_setvolume(channel_id, s),
             SNDC_SETPITCH => self.process_setpitch(channel_id, s),
             SNDC_WAVECONFIRM => self.process_waveconfirm(s),
-            SNDC_TRAINING => self.process_training(s),
+            SNDC_TRAINING => self.process_training(channel_id, s),
             SNDC_FORMATS => self.process_formats(channel_id, s),
             SNDC_CRYPTKEY => self.process_cryptkey(s),
             SNDC_WAVEENCRYPT => self.process_waveencrypt(s),
@@ -272,16 +300,16 @@ pub const rdpsnd_priv_t = extern struct
             SNDC_UDPWAVELAST => self.process_udpwavelast(s),
             SNDC_QUALITYMODE => self.process_qualitymode(s),
             SNDC_WAVE2 => self.process_wave2(s),
-            else => c.LIBRDPSND_ERROR_NONE,
+            else => c.LIBRDPSND_ERROR_PROCESS_DATA,
         };
     }
 
     //*************************************************************************
-    pub fn send_confirm(self: *rdpsnd_priv_t, channel_id: u16,
+    pub fn send_waveconfirm(self: *rdpsnd_priv_t, channel_id: u16,
             timestamp: u16, block_no: u8) !c_int
     {
         try self.logln(@src(),
-                "channel_id 0x{X} timestamp {} block_no 0x{X}",
+                "channel_id 0x{X} timestamp {} block_no {}",
                 .{channel_id, timestamp, block_no});
         const s = try parse.create(self.allocator, 64);
         defer s.delete();
@@ -298,7 +326,103 @@ pub const rdpsnd_priv_t = extern struct
             return asend_data(&self.rdpsnd, channel_id,
                     slice.ptr, @truncate(slice.len));
         }
-        return c.LIBRDPSND_ERROR_NONE;
+        return c.LIBRDPSND_ERROR_SEND_WAVECONFIRM;
+    }
+
+    //*************************************************************************
+    pub fn send_training(self: *rdpsnd_priv_t, channel_id: u16,
+            time_stamp: u16, pack_size: u16,
+            data: ?*anyopaque, bytes: u32) !c_int
+    {
+        try self.logln(@src(), "channel_id 0x{X} pack_size {} bytes {}",
+                .{channel_id, pack_size, bytes});
+        const s = try parse.create(self.allocator, pack_size + 64);
+        defer s.delete();
+        try s.check_rem(4);
+        s.out_u16_le(time_stamp);
+        s.out_u16_le(pack_size);
+        if (pack_size > 0)
+        {
+            if (data) |adata|
+            {
+                try s.check_rem(bytes);
+                var slice: []u8 = undefined;
+                slice.ptr = @ptrCast(adata);
+                slice.len = bytes;
+                s.out_u8_slice(slice);
+            }
+        }
+        const slice = s.get_out_slice();
+        if (self.rdpsnd.send_data) |asend_data|
+        {
+            return asend_data(&self.rdpsnd, channel_id,
+                    slice.ptr, @truncate(slice.len));
+        }
+        return c.LIBRDPSND_ERROR_SEND_TRAINING;
+    }
+
+    //*************************************************************************
+    pub fn send_formats(self: *rdpsnd_priv_t, channel_id: u16,
+            flags: u32, volume: u32, pitch: u32, dgram_port: u16,
+            version: u16, block_no: u8,
+            num_formats: u16, formats: [*]c.format_t) !c_int
+    {
+        try self.logln(@src(),
+                "channel_id 0x{X} flags 0x{X} volume {} pitch {} " ++
+                "version {} block_no 0x{X} num_formats {}",
+                .{channel_id, flags, volume, pitch, version, block_no,
+                num_formats});
+        var body_size: u16 = 20;
+        for (0..num_formats) |index|
+        {
+            body_size += 18 + formats[index].cbSize;
+        }
+        const s = try parse.create(self.allocator, 4 + body_size);
+        defer s.delete();
+        try s.check_rem(4 + body_size);
+        s.out_u8(SNDC_FORMATS);     // msgType
+        s.out_u8_skip(1);           // bPad
+        s.out_u16_le(body_size);    // BodySize
+        s.out_u32_le(flags);
+        s.out_u32_le(volume);
+        s.out_u32_le(pitch);
+        s.out_u16_le(dgram_port);
+        s.out_u16_le(num_formats);
+        s.out_u8(block_no);
+        s.out_u16_le(version);
+        s.out_u8_skip(1);
+        for (0..num_formats) |index|
+        {
+            const format = &formats[index];
+            s.out_u16_le(format.wFormatTag);
+            s.out_u16_le(format.nChannels);
+            s.out_u32_le(format.nSamplesPerSec);
+            s.out_u32_le(format.nAvgBytesPerSec);
+            s.out_u16_le(format.nBlockAlign);
+            s.out_u16_le(format.wBitsPerSample);
+            s.out_u16_le(format.cbSize);
+            if (format.cbSize > 0)
+            {
+                if (format.data) |adata|
+                {
+                    var slice: []u8 = undefined;
+                    slice.ptr = @ptrCast(adata);
+                    slice.len = format.cbSize;
+                    s.out_u8_slice(slice);
+                }
+                else
+                {
+                    return c.LIBRDPSND_ERROR_SEND_FORMATS;
+                }
+            }
+        }
+        const slice = s.get_out_slice();
+        if (self.rdpsnd.send_data) |asend_data|
+        {
+            return asend_data(&self.rdpsnd, channel_id,
+                    slice.ptr, @truncate(slice.len));
+        }
+        return c.LIBRDPSND_ERROR_SEND_FORMATS;
     }
 
 };
