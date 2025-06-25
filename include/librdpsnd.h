@@ -14,6 +14,7 @@
 #define LIBRDPSND_ERROR_PROCESS_TRAINING        -7
 #define LIBRDPSND_ERROR_SEND_TRAINING           -8
 #define LIBRDPSND_ERROR_PROCESS_WAVE            -9
+#define LIBRDPSND_ERROR_PROCESS_CLOSE           -10
 
 // struct rdpsnd_t::process_formats:flags
 

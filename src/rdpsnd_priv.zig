@@ -34,6 +34,15 @@ pub const rdpsnd_priv_t = extern struct
     wave_size: u32 = 0,
 
     //*************************************************************************
+    pub fn create(allocator: *const std.mem.Allocator) !*rdpsnd_priv_t
+    {
+        const priv: *rdpsnd_priv_t = try allocator.create(rdpsnd_priv_t);
+        errdefer allocator.destroy(priv);
+        priv.* = .{.allocator = allocator};
+        return priv;
+    }
+
+    //*************************************************************************
     pub fn delete(self: *rdpsnd_priv_t) void
     {
         self.allocator.destroy(self);
@@ -97,7 +106,7 @@ pub const rdpsnd_priv_t = extern struct
     //*************************************************************************
     fn process_close(self: *rdpsnd_priv_t, channel_id: u16) !c_int
     {
-        try self.logln(@src(), "", .{});
+        try self.logln_devel(@src(), "", .{});
         if (self.rdpsnd.process_close) |aprocess_close|
         {
             return aprocess_close(&self.rdpsnd, channel_id);
@@ -159,7 +168,7 @@ pub const rdpsnd_priv_t = extern struct
     fn process_training(self: *rdpsnd_priv_t, channel_id: u16,
             s: *parse.parse_t) !c_int
     {
-        try self.logln(@src(), "channel_id 0x{X}", .{channel_id});
+        try self.logln_devel(@src(), "channel_id 0x{X}", .{channel_id});
         try s.check_rem(4);
         const time_stamp = s.in_u16_le();
         const pack_size = s.in_u16_le();
@@ -278,7 +287,7 @@ pub const rdpsnd_priv_t = extern struct
     {
         try self.logln_devel(@src(), "channel_id 0x{X} slice.len {}",
                 .{channel_id, slice.len});
-        const s = try parse.create_from_slice(self.allocator, slice);
+        const s = try parse.parse_t.create_from_slice(self.allocator, slice);
         defer s.delete();
         try s.check_rem(4);
         const msg_type = s.in_u8();
@@ -308,10 +317,10 @@ pub const rdpsnd_priv_t = extern struct
     pub fn send_waveconfirm(self: *rdpsnd_priv_t, channel_id: u16,
             timestamp: u16, block_no: u8) !c_int
     {
-        try self.logln(@src(),
+        try self.logln_devel(@src(),
                 "channel_id 0x{X} timestamp {} block_no {}",
                 .{channel_id, timestamp, block_no});
-        const s = try parse.create(self.allocator, 64);
+        const s = try parse.parse_t.create(self.allocator, 64);
         defer s.delete();
         try s.check_rem(8);
         s.out_u8(SNDC_WAVECONFIRM); // msgType
@@ -334,9 +343,9 @@ pub const rdpsnd_priv_t = extern struct
             time_stamp: u16, pack_size: u16,
             data: ?*anyopaque, bytes: u32) !c_int
     {
-        try self.logln(@src(), "channel_id 0x{X} pack_size {} bytes {}",
+        try self.logln_devel(@src(), "channel_id 0x{X} pack_size {} bytes {}",
                 .{channel_id, pack_size, bytes});
-        const s = try parse.create(self.allocator, pack_size + 64);
+        const s = try parse.parse_t.create(self.allocator, pack_size + 64);
         defer s.delete();
         try s.check_rem(4);
         s.out_u16_le(time_stamp);
@@ -377,7 +386,7 @@ pub const rdpsnd_priv_t = extern struct
         {
             body_size += 18 + formats[index].cbSize;
         }
-        const s = try parse.create(self.allocator, 4 + body_size);
+        const s = try parse.parse_t.create(self.allocator, 4 + body_size);
         defer s.delete();
         try s.check_rem(4 + body_size);
         s.out_u8(SNDC_FORMATS);     // msgType
@@ -426,12 +435,3 @@ pub const rdpsnd_priv_t = extern struct
     }
 
 };
-
-//*****************************************************************************
-pub fn create(allocator: *const std.mem.Allocator) !*rdpsnd_priv_t
-{
-    const priv: *rdpsnd_priv_t = try allocator.create(rdpsnd_priv_t);
-    errdefer allocator.destroy(priv);
-    priv.* = .{.allocator = allocator};
-    return priv;
-}

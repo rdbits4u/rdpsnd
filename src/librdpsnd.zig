@@ -28,7 +28,7 @@ export fn rdpsnd_create(rdpsnd: ?**c.rdpsnd_t) c_int
     // check if rdpsnd is nil
     if (rdpsnd) |ardpsnd|
     {
-        const priv = rdpsnd_priv.create(&g_allocator) catch
+        const priv = rdpsnd_priv.rdpsnd_priv_t.create(&g_allocator) catch
                 return c.LIBRDPSND_ERROR_MEMORY;
         ardpsnd.* = @ptrCast(priv);
         return c.LIBRDPSND_ERROR_NONE;
