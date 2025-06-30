@@ -28,7 +28,7 @@
 // received.
 #define TSSNDCAPS_PITCH     0x00000004
 
-struct format_t
+struct rdpsnd_format_t
 {
     uint16_t wFormatTag;
     uint16_t nChannels;
@@ -62,7 +62,7 @@ struct rdpsnd_t
                            uint32_t flags, uint32_t volume,
                            uint32_t pitch, uint16_t dgram_port,
                            uint16_t version, uint8_t block_no,
-                           uint16_t num_formats, struct format_t* formats);
+                           uint16_t num_formats, struct rdpsnd_format_t* formats);
     void* user;
 };
 
@@ -90,6 +90,6 @@ int rdpsnd_send_formats(struct rdpsnd_t* rdpsnd, uint16_t channel_id,
                         uint32_t flags, uint32_t volume,
                         uint32_t pitch, uint16_t dgram_port,
                         uint16_t version, uint8_t block_no,
-                        uint16_t num_formats, struct format_t* formats);
+                        uint16_t num_formats, struct rdpsnd_format_t* formats);
 
 #endif

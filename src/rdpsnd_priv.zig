@@ -201,13 +201,13 @@ pub const rdpsnd_priv_t = extern struct
         const block_no = s.in_u8();
         const version = s.in_u16_le();
         s.in_u8_skip(1); // bPad
-        var formats = std.ArrayList(c.format_t).init(self.allocator.*);
+        var formats = std.ArrayList(c.rdpsnd_format_t).init(self.allocator.*);
         defer formats.deinit();
         try self.logln(@src(), "num_formats {} block_no {}",
                 .{num_formats, block_no});
         for (0..num_formats) |_|
         {
-            var format: c.format_t = .{};
+            var format: c.rdpsnd_format_t = .{};
             try s.check_rem(18);
             format.wFormatTag = s.in_u16_le();
             format.nChannels = s.in_u16_le();
@@ -374,7 +374,7 @@ pub const rdpsnd_priv_t = extern struct
     pub fn send_formats(self: *rdpsnd_priv_t, channel_id: u16,
             flags: u32, volume: u32, pitch: u32, dgram_port: u16,
             version: u16, block_no: u8,
-            num_formats: u16, formats: [*]c.format_t) !c_int
+            num_formats: u16, formats: [*]c.rdpsnd_format_t) !c_int
     {
         try self.logln(@src(),
                 "channel_id 0x{X} flags 0x{X} volume {} pitch {} " ++

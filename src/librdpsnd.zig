@@ -126,7 +126,7 @@ export fn rdpsnd_send_training(rdpsnd: ?*c.rdpsnd_t, channel_id: u16,
 export fn rdpsnd_send_formats(rdpsnd: ?*c.rdpsnd_t, channel_id: u16,
         flags: u32, volume: u32, pitch: u32, dgram_port: u16,
         version: u16, block_no: u8,
-        num_formats: u16, formats: ?[*]c.format_t) c_int
+        num_formats: u16, formats: ?[*]c.rdpsnd_format_t) c_int
 {
     // check if rdpsnd is nil
     if (rdpsnd) |ardpsnd|
