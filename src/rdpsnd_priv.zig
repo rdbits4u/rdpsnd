@@ -1,6 +1,6 @@
 const std = @import("std");
 const parse = @import("parse");
-const c = @cImport(
+pub const c = @cImport(
 {
     @cInclude("librdpsnd.h");
 });
@@ -58,8 +58,8 @@ pub const rdpsnd_priv_t = extern struct
             const alloc_buf = try std.fmt.allocPrint(self.allocator.*,
                     fmt, args);
             defer self.allocator.free(alloc_buf);
-            const alloc1_buf = try std.fmt.allocPrintZ(self.allocator.*,
-                    "rdpsnd:{s}:{s}", .{src.fn_name, alloc_buf});
+            const alloc1_buf = try std.fmt.allocPrint(self.allocator.*,
+                    "rdpsnd:{s}:{s}\x00", .{src.fn_name, alloc_buf});
             defer self.allocator.free(alloc1_buf);
             _ = alog_msg(&self.rdpsnd, alloc1_buf.ptr);
         }
@@ -201,8 +201,9 @@ pub const rdpsnd_priv_t = extern struct
         const block_no = s.in_u8();
         const version = s.in_u16_le();
         s.in_u8_skip(1); // bPad
-        var formats = std.ArrayList(c.rdpsnd_format_t).init(self.allocator.*);
-        defer formats.deinit();
+        var formats = try std.ArrayListUnmanaged(c.rdpsnd_format_t).initCapacity(
+                self.allocator.*, 32);
+        defer formats.deinit(self.allocator.*);
         try self.logln(@src(), "num_formats {} block_no {}",
                 .{num_formats, block_no});
         for (0..num_formats) |_|
@@ -222,7 +223,7 @@ pub const rdpsnd_priv_t = extern struct
                 format.data = &s.data[s.offset];
                 s.in_u8_skip(format.cbSize);
             }
-            try formats.append(format);
+            try formats.append(self.allocator.*, format);
         }
         if (self.rdpsnd.process_formats) |aprocess_formats|
         {

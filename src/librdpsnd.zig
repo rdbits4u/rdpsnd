@@ -1,9 +1,6 @@
 const std = @import("std");
 const rdpsnd_priv = @import("rdpsnd_priv.zig");
-const c = @cImport(
-{
-    @cInclude("librdpsnd.h");
-});
+const c = rdpsnd_priv.c;
 
 var g_allocator: std.mem.Allocator = std.heap.c_allocator;
 
